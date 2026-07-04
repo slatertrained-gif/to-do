@@ -23,15 +23,8 @@
     align-items: flex-end;
     justify-content: space-between;
     padding-bottom: 16px;
-    margin-bottom: 20px;
+    margin-bottom: 16px;
     border-bottom: 3px solid #EF9F27;
-  }
-  .eyebrow {
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    color: #8A8880;
-    margin: 0 0 4px;
-    text-transform: uppercase;
   }
   h1 { font-size: 24px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
   .streak-box { text-align: right; }
@@ -44,13 +37,27 @@
   }
   .streak-label { font-size: 11px; color: #8A8880; margin-top: 4px; }
 
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tab {
+    flex: 1;
+    text-align: center;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #2C2C2A;
+    background: #1E1E1D;
+    color: #8A8880;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .tab.active { background: #EF9F27; border-color: #EF9F27; color: #1E1A0E; }
+
   .task {
     border-radius: 10px;
     border: 1px solid #2C2C2A;
     background: #1E1E1D;
     margin-bottom: 10px;
     padding: 14px;
-    transition: background 0.15s ease, border-color 0.15s ease;
   }
   .task.done { background: #2A2210; border-color: #6B4A0F; }
 
@@ -123,23 +130,73 @@
     text-align: center;
   }
   .status.complete { color: #EF9F27; font-weight: 600; }
+
+  .weight-card {
+    border-radius: 10px;
+    border: 1px solid #2C2C2A;
+    background: #1E1E1D;
+    padding: 14px;
+    margin-bottom: 10px;
+  }
+  .weight-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+  .weight-row input { flex: 1; }
+  .weight-unit { font-size: 13px; color: #8A8880; padding: 0 4px; }
+
+  .section-title { font-size: 13px; font-weight: 600; color: #ECE9E2; margin: 20px 0 10px; }
+  .section-title:first-child { margin-top: 0; }
+
+  .graph-wrap {
+    border-radius: 10px;
+    border: 1px solid #2C2C2A;
+    background: #1E1E1D;
+    padding: 14px;
+    margin-bottom: 16px;
+  }
+  .graph-empty { font-size: 13px; color: #6A6864; text-align: center; padding: 20px 0; }
+
+  .history-item {
+    border-radius: 10px;
+    border: 1px solid #2C2C2A;
+    background: #1E1E1D;
+    margin-bottom: 8px;
+    padding: 14px;
+    cursor: pointer;
+  }
+  .history-head { display: flex; align-items: center; justify-content: space-between; }
+  .history-date { font-weight: 600; font-size: 14px; }
+  .history-badge {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    background: #2A2210;
+    color: #EF9F27;
+    font-weight: 600;
+  }
+  .history-badge.miss { background: #262622; color: #6A6864; }
+  .history-body { margin-top: 10px; padding-top: 10px; border-top: 1px solid #2C2C2A; font-size: 13px; color: #C4C1B8; display: none; }
+  .history-item.open .history-body { display: block; }
+  .history-body p { margin: 4px 0; }
+  .history-body .hb-label { color: #6A6864; }
+  .empty-state { font-size: 13px; color: #6A6864; text-align: center; padding: 24px 0; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="header">
-    <div>
-      <h1>To Do</h1>
-    </div>
+    <div><h1>To Do</h1></div>
     <div class="streak-box">
       <div class="streak-num" id="streakNum">0</div>
       <div class="streak-label">day streak</div>
     </div>
   </div>
 
-  <div id="taskList"></div>
+  <div class="tabs">
+    <div class="tab active" id="tabToday" onclick="switchTab('today')">Today</div>
+    <div class="tab" id="tabHistory" onclick="switchTab('history')">History</div>
+  </div>
 
-  <div class="status" id="statusLine"></div>
+  <div id="todayView"></div>
+  <div id="historyView" style="display:none;"></div>
 </div>
 
 <script>
@@ -155,6 +212,8 @@ const TASK_META = {
 
 const STATE_KEY = "hardline-todo-state";
 const BOOKS_KEY = "hardline-todo-books";
+const HISTORY_KEY = "hardline-todo-history";
+const WEIGHTS_KEY = "hardline-todo-weights";
 
 function todayKey() { return new Date().toISOString().slice(0, 10); }
 function yesterdayKey() {
@@ -170,20 +229,48 @@ function defaultEntries() {
     3: { done: false, bookId: null, page: "" },
     4: { done: false, calories: "", protein: "", fats: "", carbs: "" },
     5: { done: false, type: null },
-    6: { done: false },
+    6: { done: false, minutes: "", learned: "" },
     7: { done: false, p1: "", p2: "", p3: "" }
   };
 }
 
+function loadJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) { return fallback; }
+}
+function saveJSON(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { console.error(e); }
+}
+
+let books = loadJSON(BOOKS_KEY, []);
+let history = loadJSON(HISTORY_KEY, []);
+let weights = loadJSON(WEIGHTS_KEY, {});
+
+function bookTitle(bookId) {
+  const b = books.find(bk => bk.id === bookId);
+  return b ? b.title : null;
+}
+
 function loadState() {
-  let raw;
-  try { raw = localStorage.getItem(STATE_KEY); } catch (e) { raw = null; }
-  let state = raw ? JSON.parse(raw) : null;
+  let state = loadJSON(STATE_KEY, null);
 
   if (!state) {
     return { streak: 0, lastCompletionDate: null, date: todayKey(), entries: defaultEntries() };
   }
   if (state.date !== todayKey()) {
+    const doneCount = Object.values(state.entries).filter(e => e.done).length;
+    const hadActivity = doneCount > 0;
+    if (hadActivity) {
+      history = history.filter(h => h.date !== state.date);
+      history.unshift({
+        date: state.date,
+        entries: state.entries,
+        allDone: doneCount === Object.keys(TASK_META).length
+      });
+      saveJSON(HISTORY_KEY, history);
+    }
     const carriedOver = state.lastCompletionDate === yesterdayKey() ? (state.streak || 0) : 0;
     state = {
       streak: carriedOver,
@@ -191,28 +278,14 @@ function loadState() {
       date: todayKey(),
       entries: defaultEntries()
     };
-    saveState(state);
+    saveJSON(STATE_KEY, state);
   }
   return state;
 }
 
-function saveState(state) {
-  try { localStorage.setItem(STATE_KEY, JSON.stringify(state)); } catch (e) { console.error(e); }
-}
-
-function loadBooks() {
-  try {
-    const raw = localStorage.getItem(BOOKS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (e) { return []; }
-}
-
-function saveBooks(books) {
-  try { localStorage.setItem(BOOKS_KEY, JSON.stringify(books)); } catch (e) { console.error(e); }
-}
-
 let state = loadState();
-let books = loadBooks();
+
+function saveState() { saveJSON(STATE_KEY, state); }
 
 function toggleDone(taskId) {
   const entry = state.entries[taskId];
@@ -227,39 +300,22 @@ function toggleDone(taskId) {
     state.lastCompletionDate = null;
     state.streak = Math.max(0, state.streak - 1);
   }
-  saveState(state);
-  render();
+  saveState();
+  renderToday();
 }
 
 function setTrainMode(mode) {
   state.entries[1].mode = mode;
   if (mode === "Stretch") state.entries[1].category = null;
-  saveState(state);
-  render();
+  saveState(); renderToday();
 }
-function setTrainCategory(cat) {
-  state.entries[1].category = cat;
-  saveState(state);
-  render();
-}
-function setColdType(type) {
-  state.entries[2].type = type;
-  saveState(state);
-  render();
-}
-function setContentType(type) {
-  state.entries[5].type = type;
-  saveState(state);
-  render();
-}
-function updateMealField(field, value) {
-  state.entries[4][field] = value;
-  saveState(state);
-}
-function updateTomorrowField(field, value) {
-  state.entries[7][field] = value;
-  saveState(state);
-}
+function setTrainCategory(cat) { state.entries[1].category = cat; saveState(); renderToday(); }
+function setColdType(type) { state.entries[2].type = type; saveState(); renderToday(); }
+function setContentType(type) { state.entries[5].type = type; saveState(); renderToday(); }
+function updateMealField(field, value) { state.entries[4][field] = value; saveState(); }
+function updateBusinessMinutes(value) { state.entries[6].minutes = value; saveState(); }
+function updateBusinessLearned(value) { state.entries[6].learned = value; saveState(); }
+function updateTomorrowField(field, value) { state.entries[7][field] = value; saveState(); }
 
 function onBookSelectChange(value) {
   if (value === "__new__") {
@@ -270,35 +326,38 @@ function onBookSelectChange(value) {
     const b = books.find(bk => bk.id === value);
     state.entries[3].page = b ? String(b.page || "") : "";
   }
-  saveState(state);
-  render();
+  saveState(); renderToday();
 }
 function confirmNewBook(title) {
   const trimmed = title.trim();
   if (!trimmed) return;
   const id = "b" + Date.now();
   books.push({ id, title: trimmed, page: 0, completed: false });
-  saveBooks(books);
+  saveJSON(BOOKS_KEY, books);
   state.entries[3].bookId = id;
   state.entries[3].page = "";
-  saveState(state);
-  render();
+  saveState(); renderToday();
 }
 function updateBookPage(value) {
   state.entries[3].page = value;
   const b = books.find(bk => bk.id === state.entries[3].bookId);
-  if (b) { b.page = value; saveBooks(books); }
+  if (b) { b.page = value; saveJSON(BOOKS_KEY, books); }
 }
 function markBookFinished() {
   const b = books.find(bk => bk.id === state.entries[3].bookId);
   if (b) {
     b.completed = true;
-    saveBooks(books);
+    saveJSON(BOOKS_KEY, books);
     state.entries[3].bookId = null;
     state.entries[3].page = "";
-    saveState(state);
-    render();
+    saveState(); renderToday();
   }
+}
+
+function updateWeight(value) {
+  weights[todayKey()] = value === "" ? undefined : parseFloat(value);
+  if (weights[todayKey()] === undefined) delete weights[todayKey()];
+  saveJSON(WEIGHTS_KEY, weights);
 }
 
 function pillRow(options, activeValue, onClickName) {
@@ -319,11 +378,9 @@ function renderDetail(taskId) {
     }
     return html;
   }
-
   if (taskId === 2) {
     return `<div class="field-label">Type</div>` + pillRow(["Ice bath", "Cold shower"], e.type, "setColdType");
   }
-
   if (taskId === 3) {
     const activeBooks = books.filter(b => !b.completed);
     let options = activeBooks.map(b =>
@@ -339,7 +396,7 @@ function renderDetail(taskId) {
 
     if (e.bookId === "__new__") {
       html += `<div class="field-label">New book title</div>
-        <input type="text" id="newBookInput" placeholder="Book title" onblur="confirmNewBook(this.value)" onkeydown="if(event.key==='Enter'){this.blur();}" />`;
+        <input type="text" placeholder="Book title" onblur="confirmNewBook(this.value)" onkeydown="if(event.key==='Enter'){this.blur();}" />`;
     } else if (e.bookId) {
       html += `<div class="field-label">Page</div>
         <div class="book-row">
@@ -349,7 +406,6 @@ function renderDetail(taskId) {
     }
     return html;
   }
-
   if (taskId === 4) {
     return `<div class="num-grid">
       <div><div class="field-label">Calories</div><input type="number" value="${e.calories}" placeholder="0" oninput="updateMealField('calories', this.value)"></div>
@@ -358,12 +414,16 @@ function renderDetail(taskId) {
       <div><div class="field-label">Carbs (g)</div><input type="number" value="${e.carbs}" placeholder="0" oninput="updateMealField('carbs', this.value)"></div>
     </div>`;
   }
-
   if (taskId === 5) {
     return `<div class="field-label">Format</div>` +
       pillRow(["Talking head", "B-roll", "Talking head and B-roll", "Carousel", "Other"], e.type, "setContentType");
   }
-
+  if (taskId === 6) {
+    return `<div class="field-label">Minutes spent</div>
+      <input type="number" value="${e.minutes}" placeholder="0" oninput="updateBusinessMinutes(this.value)">
+      <div class="field-label">What did you learn</div>
+      <input type="text" value="${e.learned}" placeholder="Key takeaway" oninput="updateBusinessLearned(this.value)">`;
+  }
   if (taskId === 7) {
     return `<div class="field-label">Priority 1</div>
       <input type="text" value="${e.p1}" placeholder="First priority" oninput="updateTomorrowField('p1', this.value)">
@@ -372,14 +432,14 @@ function renderDetail(taskId) {
       <div class="field-label">Priority 3</div>
       <input type="text" value="${e.p3}" placeholder="Third priority" oninput="updateTomorrowField('p3', this.value)">`;
   }
-
   return "";
 }
 
-function render() {
-  const list = document.getElementById("taskList");
-  list.innerHTML = "";
+function renderToday() {
+  const view = document.getElementById("todayView");
+  view.innerHTML = "";
 
+  const list = document.createElement("div");
   Object.keys(TASK_META).forEach(key => {
     const id = Number(key);
     const meta = TASK_META[id];
@@ -387,8 +447,7 @@ function render() {
 
     const card = document.createElement("div");
     card.className = "task" + (done ? " done" : "");
-
-    const detailHtml = id === 6 ? "" : `<div class="task-detail">${renderDetail(id)}</div>`;
+    const detailHtml = `<div class="task-detail">${renderDetail(id)}</div>`;
 
     card.innerHTML = `
       <div class="task-header" onclick="toggleDone(${id})">
@@ -406,22 +465,161 @@ function render() {
     `;
     list.appendChild(card);
   });
+  view.appendChild(list);
+
+  const weightVal = weights[todayKey()];
+  const weightCard = document.createElement("div");
+  weightCard.className = "weight-card";
+  weightCard.innerHTML = `
+    <p class="task-label">Weight</p>
+    <p class="task-sub">Log today's weigh-in</p>
+    <div class="weight-row">
+      <input type="number" step="0.1" value="${weightVal !== undefined ? weightVal : ''}" placeholder="0.0" oninput="updateWeight(this.value)">
+      <span class="weight-unit">kg</span>
+    </div>
+  `;
+  view.appendChild(weightCard);
 
   const doneCount = Object.values(state.entries).filter(e => e.done).length;
   const total = Object.keys(TASK_META).length;
   document.getElementById("streakNum").textContent = state.streak;
 
-  const statusEl = document.getElementById("statusLine");
-  if (doneCount === total) {
-    statusEl.textContent = "Standard met. That's the whole day banked.";
-    statusEl.classList.add("complete");
-  } else {
-    statusEl.textContent = `${total - doneCount} of ${total} left today.`;
-    statusEl.classList.remove("complete");
-  }
+  const statusEl = document.createElement("div");
+  statusEl.className = "status" + (doneCount === total ? " complete" : "");
+  statusEl.textContent = doneCount === total
+    ? "Standard met. That's the whole day banked."
+    : `${total - doneCount} of ${total} left today.`;
+  view.appendChild(statusEl);
 }
 
-render();
+function weightGraphSVG() {
+  const entries = Object.keys(weights)
+    .filter(d => weights[d] !== undefined && weights[d] !== null && !isNaN(weights[d]))
+    .sort()
+    .slice(-20)
+    .map(d => ({ date: d, value: weights[d] }));
+
+  if (entries.length < 2) {
+    return `<div class="graph-empty">Log weight on at least 2 days to see a graph.</div>`;
+  }
+
+  const w = 640, h = 200, padL = 40, padR = 12, padT = 16, padB = 28;
+  const values = entries.map(e => e.value);
+  const minV = Math.min(...values);
+  const maxV = Math.max(...values);
+  const range = maxV - minV || 1;
+  const yFor = v => padT + (h - padT - padB) * (1 - (v - minV) / range);
+  const xFor = i => padL + (w - padL - padR) * (i / (entries.length - 1));
+
+  const points = entries.map((e, i) => `${xFor(i)},${yFor(e.value)}`).join(" ");
+  const dots = entries.map((e, i) =>
+    `<circle cx="${xFor(i)}" cy="${yFor(e.value)}" r="3.5" fill="#EF9F27" />`
+  ).join("");
+
+  const firstDate = entries[0].date.slice(5);
+  const lastDate = entries[entries.length - 1].date.slice(5);
+
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%; height:auto;">
+    <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${h - padB}" stroke="#3A3A38" stroke-width="1"/>
+    <line x1="${padL}" y1="${h - padB}" x2="${w - padR}" y2="${h - padB}" stroke="#3A3A38" stroke-width="1"/>
+    <text x="4" y="${yFor(maxV) + 4}" font-size="11" fill="#8A8880">${maxV}</text>
+    <text x="4" y="${yFor(minV) + 4}" font-size="11" fill="#8A8880">${minV}</text>
+    <text x="${padL}" y="${h - 8}" font-size="11" fill="#8A8880">${firstDate}</text>
+    <text x="${w - padR - 30}" y="${h - 8}" font-size="11" fill="#8A8880">${lastDate}</text>
+    <polyline points="${points}" fill="none" stroke="#EF9F27" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+    ${dots}
+  </svg>`;
+}
+
+function taskSummaryLine(taskId, e) {
+  if (!e.done) return null;
+  if (taskId === 1) {
+    if (e.mode === "Train") return `Train${e.category ? " — " + e.category : ""}`;
+    if (e.mode === "Stretch") return "Stretch";
+    return "Train";
+  }
+  if (taskId === 2) return e.type ? "Cold exposure — " + e.type : "Cold exposure";
+  if (taskId === 3) {
+    const title = bookTitle(e.bookId);
+    return "Read" + (title ? " — " + title + (e.page ? ", page " + e.page : "") : "");
+  }
+  if (taskId === 4) {
+    const parts = [];
+    if (e.calories) parts.push(e.calories + " cal");
+    if (e.protein) parts.push(e.protein + "g protein");
+    if (e.fats) parts.push(e.fats + "g fats");
+    if (e.carbs) parts.push(e.carbs + "g carbs");
+    return "Meals" + (parts.length ? " — " + parts.join(", ") : "");
+  }
+  if (taskId === 5) return "Content" + (e.type ? " — " + e.type : "");
+  if (taskId === 6) return "Business study" + (e.minutes ? " — " + e.minutes + " min" : "") + (e.learned ? " — " + e.learned : "");
+  if (taskId === 7) {
+    const priorities = [e.p1, e.p2, e.p3].filter(Boolean);
+    return "Tomorrow" + (priorities.length ? ": " + priorities.join(" / ") : "");
+  }
+  return TASK_META[taskId].label;
+}
+
+function toggleHistoryItem(idx) {
+  const el = document.getElementById("hist-" + idx);
+  if (el) el.classList.toggle("open");
+}
+
+function renderHistory() {
+  const view = document.getElementById("historyView");
+  view.innerHTML = "";
+
+  const graphWrap = document.createElement("div");
+  graphWrap.className = "graph-wrap";
+  graphWrap.innerHTML = `<p class="section-title" style="margin-top:0;">Weight trend</p>` + weightGraphSVG();
+  view.appendChild(graphWrap);
+
+  const listTitle = document.createElement("p");
+  listTitle.className = "section-title";
+  listTitle.textContent = "Past days";
+  view.appendChild(listTitle);
+
+  if (history.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "Nothing logged yet. Come back after your first full day.";
+    view.appendChild(empty);
+    return;
+  }
+
+  history.forEach((day, idx) => {
+    const item = document.createElement("div");
+    item.className = "history-item";
+    item.id = "hist-" + idx;
+
+    const lines = Object.keys(TASK_META)
+      .map(k => taskSummaryLine(Number(k), day.entries[k]))
+      .filter(Boolean);
+
+    const bodyHtml = lines.length
+      ? lines.map(l => `<p>${l}</p>`).join("")
+      : `<p class="hb-label">Nothing completed that day.</p>`;
+
+    item.innerHTML = `
+      <div class="history-head" onclick="toggleHistoryItem(${idx})">
+        <span class="history-date">${day.date}</span>
+        <span class="history-badge${day.allDone ? "" : " miss"}">${day.allDone ? "Standard met" : lines.length + "/7"}</span>
+      </div>
+      <div class="history-body">${bodyHtml}</div>
+    `;
+    view.appendChild(item);
+  });
+}
+
+function switchTab(tab) {
+  document.getElementById("tabToday").classList.toggle("active", tab === "today");
+  document.getElementById("tabHistory").classList.toggle("active", tab === "history");
+  document.getElementById("todayView").style.display = tab === "today" ? "block" : "none";
+  document.getElementById("historyView").style.display = tab === "history" ? "block" : "none";
+  if (tab === "history") renderHistory();
+}
+
+renderToday();
 </script>
 </body>
 </html>
